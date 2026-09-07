@@ -8,6 +8,8 @@ import json
 import logging
 import re
 import time
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Optional, Any
 
 import requests
@@ -34,6 +36,8 @@ logger = logging.getLogger(__name__)
 # ===================================================
 try:
     bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+    bot.remove_webhook()
+    logger.info("✅ Webhook removed successfully")
     bot.get_me()
     logger.info("✅ Bot connected successfully!")
 except Exception as e:
@@ -61,10 +65,6 @@ def is_valid_mobile_number(number: str) -> bool:
     return bool(re.match(r'^\d{10}$', number))
 
 def format_record(record: Dict[str, Any], index: int) -> str:
-    """
-    Format a single record into a beautiful message.
-    Handles the new API response format.
-    """
     mobile = record.get("mobile", "Not Available")
     name = record.get("name", "Not Available")
     fname = record.get("fname", "Not Available")
@@ -74,7 +74,6 @@ def format_record(record: Dict[str, Any], index: int) -> str:
     record_id = record.get("id", "Not Available")
     email = record.get("email", "Not Available")
 
-    # Clean up address - replace ! with newlines for better readability
     if address != "Not Available":
         address = address.replace("!", "\n")
 
@@ -108,10 +107,6 @@ Please Try Another Number.
 ╰━━━━━━━━━━━━━━━━━━⬣"""
 
 def fetch_number_info(number: str) -> Optional[Dict[str, Any]]:
-    """
-    Fetch number information from the API.
-    Returns the JSON response as dictionary or None on error.
-    """
     try:
         url = f"{API_URL}{number}"
         logger.info(f"Calling API: {url}")
@@ -164,7 +159,6 @@ def handle_number_lookup(message: Message, number: str) -> None:
         )
         return
 
-    # Extract records from the new API format
     records = data.get("Results", [])
 
     if not records or not isinstance(records, list):
@@ -174,15 +168,12 @@ def handle_number_lookup(message: Message, number: str) -> None:
 
     total_records = len(records)
 
-    # Delete the searching message
     bot.delete_message(chat_id, searching_msg.message_id)
 
-    # Send each record as a separate message
     for idx, record in enumerate(records):
         formatted_record = format_record(record, idx)
         bot.send_message(chat_id, formatted_record, parse_mode="HTML")
 
-    # Send total records count
     bot.send_message(chat_id, f"📊 Total Records Found : {total_records}")
 
 # ===================================================
@@ -258,12 +249,37 @@ Example: <code>1234567890</code>
         )
 
 # ===================================================
+# HTTP SERVER FOR RENDER HEALTH CHECK
+# ===================================================
+def start_http_server():
+    """Render के Health Check के लिए एक सरल HTTP सर्वर"""
+    try:
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"Bot is running!")
+        
+        server = HTTPServer(('0.0.0.0', 10000), Handler)
+        server.serve_forever()
+    except Exception as e:
+        logger.warning(f"HTTP server could not start: {e}")
+
+# ===================================================
 # POLLING WITH ERROR HANDLING
 # ===================================================
 def run_bot() -> None:
     logger.info("Starting Number Info Bot...")
     logger.info(f"Bot Token: {BOT_TOKEN[:10]}...")
     logger.info(f"API URL: {API_URL}")
+    
+    # HTTP server को background में start करें (Render Health Check के लिए)
+    try:
+        http_thread = threading.Thread(target=start_http_server, daemon=True)
+        http_thread.start()
+        logger.info("✅ HTTP server started on port 10000")
+    except Exception as e:
+        logger.warning(f"Could not start HTTP server: {e}")
 
     while True:
         try:
@@ -271,9 +287,12 @@ def run_bot() -> None:
             bot.polling(none_stop=True, interval=1, timeout=60)
         except telebot.apihelper.ApiTelegramException as e:
             if "409" in str(e):
-                logger.warning("Conflict error - webhook removed, retrying...")
-                bot.remove_webhook()
-                time.sleep(2)
+                logger.warning("⚠️ Conflict detected - removing webhook and retrying...")
+                try:
+                    bot.remove_webhook()
+                    time.sleep(2)
+                except:
+                    pass
             elif "404" in str(e):
                 logger.error("❌ INVALID BOT TOKEN!")
                 break
