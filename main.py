@@ -17,7 +17,7 @@ from telebot.types import Message, ReplyKeyboardMarkup, KeyboardButton
 # ===================================================
 # CONFIGURATION
 # ===================================================
-BOT_TOKEN = "8806980379:AAHQ8FFAMYWF5fS6ELxEMt39VH_rdBDHeHs"
+BOT_TOKEN = "8574337060:AAE8IzX3pExvA0kYpSXcp3IMP9-zgRRv37k"
 API_URL = "https://ansh-apis.is-dev.org/api/creta?key=ansh&num="
 
 # ===================================================
